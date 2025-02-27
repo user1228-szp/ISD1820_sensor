@@ -1,31 +1,74 @@
-import serial
-import wave
 import os
+import time
+import wave
 import struct
+from threading import Thread
 from flask import Flask, request, jsonify, render_template_string
+import serial
 
 app = Flask(__name__)
 
-# Configurar puerto serie (ajustar el puerto según tu sistema)
-SERIAL_PORT = "COM3"  # Cambia esto a tu puerto
+# Configuración del puerto serie y otros parámetros
+SERIAL_PORT = "COM3"  # Cambia este valor al puerto donde está conectado tu Arduino
 BAUD_RATE = 115200
 
-# Configurar carpeta de almacenamiento
+# Carpeta donde se guardarán las grabaciones
 UPLOAD_FOLDER = "static"
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
-# Ruta del archivo donde se guardará el audio capturado desde Arduino
+# Ruta del archivo de audio grabado
 AUDIO_FILE_PATH = os.path.join(UPLOAD_FOLDER, "recorded_audio.wav")
 
-# Página principal con la interfaz web
+# Variables globales para controlar la grabación
+is_recording = False
+wave_file = None
+
+def record_audio_from_arduino():
+    """Función que lee datos del Arduino y los escribe en un archivo WAV cuando se activa la grabación."""
+    global is_recording, wave_file
+    try:
+        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+    except Exception as e:
+        print(f"Error al abrir el puerto serie: {e}")
+        return
+
+    while True:
+        if is_recording:
+            # Si se inicia la grabación y el archivo no está abierto, se abre
+            if wave_file is None:
+                wave_file = wave.open(AUDIO_FILE_PATH, 'wb')
+                wave_file.setnchannels(1)     # Mono
+                wave_file.setsampwidth(2)       # 16 bits (2 bytes)
+                wave_file.setframerate(8000)    # Frecuencia de muestreo de 8 kHz
+                print("Grabación iniciada...")
+
+            if ser.in_waiting > 0:
+                try:
+                    line = ser.readline().decode("utf-8").strip()
+                    if line.isdigit():
+                        sample = int(line)
+                        # Empaquetar la muestra en formato PCM 16-bit little endian
+                        audio_bytes = struct.pack('<h', sample)
+                        wave_file.writeframes(audio_bytes)
+                except Exception as e:
+                    print(f"Error al leer/escribir: {e}")
+        else:
+            # Si no se está grabando y el archivo está abierto, se cierra
+            if wave_file is not None:
+                wave_file.close()
+                wave_file = None
+                print("Grabación detenida.")
+            time.sleep(0.1)  # Evitar busy waiting
+
+# Página principal con botones para controlar la grabación
 @app.route('/')
 def index():
     return render_template_string("""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Aplicación Flask</title>
+        <title>Control de Grabación</title>
         <style>
             body {
                 font-family: Arial, sans-serif;
@@ -37,9 +80,6 @@ def index():
                 align-items: center;
                 height: 100vh;
                 flex-direction: column;
-            }
-            h1 {
-                color: #333;
             }
             .container {
                 text-align: center;
@@ -61,120 +101,66 @@ def index():
             .button:hover {
                 background-color: #0056b3;
             }
-            #image-container, #audio-container {
+            audio {
                 margin-top: 20px;
-                display: none;
-                text-align: center;
-            }
-            #image-container img {
-                max-width: 100%;
-                height: auto;
-            }
-            input[type="file"] {
-                margin-top: 15px;
             }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>Audio</h1>
-            
-            <h2>Subir Archivo de Voz</h2>
-            <input type="file" id="fileInput" accept="audio/*">
-            <button class="button" onclick="uploadVoice()">Subir Voz</button>
+            <h1>Control de Grabación</h1>
+            <button class="button" onclick="startRecording()">Iniciar Grabación</button>
+            <button class="button" onclick="stopRecording()">Detener Grabación</button>
             <p id="status"></p>
-
-            <h2>Reproducir Audio Recibido</h2>
-            <button class="button" onclick="playAudio()">Escuchar Grabación</button>
-            <audio id="audioPlayer" controls style="display:none;">
+            <h2>Reproducir Grabación</h2>
+            <audio id="audioPlayer" controls>
                 <source src="/static/recorded_audio.wav" type="audio/wav">
             </audio>
         </div>
 
         <script>
-            function toggleImage() {
-                const imageContainer = document.getElementById('image-container');
-                imageContainer.style.display = imageContainer.style.display === 'none' ? 'block' : 'none';
-            }
-
-            function uploadVoice() {
-                const fileInput = document.getElementById('fileInput');
-                const status = document.getElementById('status');
-
-                if (fileInput.files.length === 0) {
-                    status.innerText = "Selecciona un archivo primero.";
-                    return;
-                }
-
-                const formData = new FormData();
-                formData.append("file", fileInput.files[0]);
-
-                fetch("/upload", {
-                    method: "POST",
-                    body: formData
-                })
+            function startRecording() {
+                fetch("/start_recording", { method: "POST" })
                 .then(response => response.json())
                 .then(data => {
-                    status.innerText = data.message;
+                    document.getElementById("status").innerText = data.message;
                 })
                 .catch(error => {
-                    status.innerText = "Error al subir el archivo.";
+                    document.getElementById("status").innerText = "Error al iniciar grabación.";
                 });
             }
 
-            function playAudio() {
-                const audio = document.getElementById("audioPlayer");
-                audio.style.display = "block";
-                audio.play();
+            function stopRecording() {
+                fetch("/stop_recording", { method: "POST" })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById("status").innerText = data.message;
+                })
+                .catch(error => {
+                    document.getElementById("status").innerText = "Error al detener grabación.";
+                });
             }
         </script>
     </body>
     </html>
     """)
 
-# Ruta para subir archivos de voz manualmente
-@app.route('/upload', methods=['POST'])
-def upload_voice():
-    if 'file' not in request.files:
-        return jsonify({"message": "No se encontró ningún archivo."}), 400
+# Endpoint para iniciar la grabación
+@app.route('/start_recording', methods=['POST'])
+def start_recording():
+    global is_recording
+    is_recording = True
+    return jsonify({"message": "Grabación iniciada."})
 
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({"message": "No se seleccionó ningún archivo."}), 400
+# Endpoint para detener la grabación
+@app.route('/stop_recording', methods=['POST'])
+def stop_recording():
+    global is_recording
+    is_recording = False
+    return jsonify({"message": "Grabación detenida."})
 
-    file_path = os.path.join(UPLOAD_FOLDER, file.filename)
-    file.save(file_path)
-
-    return jsonify({"message": "Archivo subido exitosamente.", "file_path": file_path})
-
-# Función para recibir audio en tiempo real desde Arduino y guardarlo como WAV
-def record_audio_from_arduino():
-    ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-    with wave.open(AUDIO_FILE_PATH, 'wb') as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)  # 16 bits
-        wf.setframerate(8000)  # 8kHz de muestreo
-
-        print("Grabando desde Arduino...")
-
-        try:
-            while True:
-                if ser.in_waiting > 0:
-                    line = ser.readline().decode("utf-8").strip()
-                    if line.isdigit():
-                        sample = int(line)
-                        audio_bytes = struct.pack('<h', sample)  # Convertir a 16-bit PCM
-                        wf.writeframes(audio_bytes)
-        except KeyboardInterrupt:
-            print("Grabación detenida.")
-            ser.close()
-
-# **Ejecución principal**
 if __name__ == '__main__':
-    from threading import Thread
-    # Hilo para grabar audio en segundo plano
-    arduino_thread = Thread(target=record_audio_from_arduino, daemon=True)
-    arduino_thread.start()
-
-    # Iniciar Flask
+    # Iniciar en un hilo separado la función que lee del Arduino
+    t = Thread(target=record_audio_from_arduino, daemon=True)
+    t.start()
     app.run(debug=True)
