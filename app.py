@@ -13,7 +13,7 @@ SERIAL_PORT = "COM3"  # Cambia este valor al puerto donde está conectado tu Ard
 BAUD_RATE = 115200
 
 # Carpeta donde se guardarán las grabaciones
-UPLOAD_FOLDER = "static"
+UPLOAD_FOLDER = "records"
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
