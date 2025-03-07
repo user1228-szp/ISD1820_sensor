@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CONTROL DE GRABACION</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        h1, h2 {
+            color: #4169E1;
+        }
+        .button {
+            padding: 10px 15px;
+            font-size: 16px;
+            color: white;
+            background-color: #4169E1;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .button:disabled {
+            background-color: #cccccc;
+        }
+        .button-stop {
+            background-color: #FF4B2B;
+        }
+        .status {
+            margin: 15px 0;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .recording-item {
+            padding: 10px;
+            margin: 5px 0;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        audio {
+            width: 100%;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Control de Grabación</h1>
+        <div>
+            <button class="button" onclick="startRecording()">Iniciar Grabación</button>
+            <button class="button button-stop" onclick="stopRecording()">Detener Grabación</button>
+        </div>
+        <p id="status" class="status"></p>
+        <h2>Lista de Grabaciones</h2>
+        <ul>
+            {% for archivo in archivos %}
+            <li class="recording-item">
+                {{ archivo }} 
+                <div>
+                    <button class="button" onclick="window.location.href='/descargar/{{ archivo }}'">Descargar</button>
+                    <button class="button button-stop" onclick="window.location.href='/eliminar/{{ archivo }}'">Eliminar</button>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <script>
+        function startRecording() {
+            fetch("/start_recording", { method: "POST" })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById("status").innerText = data.message;
+            })
+            .catch(error => {
+                document.getElementById("status").innerText = "Error al iniciar grabación.";
+            });
+        }
+
+        function stopRecording() {
+            fetch("/stop_recording", { method: "POST" })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById("status").innerText = data.message;
+            })
+            .catch(error => {
+                document.getElementById("status").innerText = "Error al detener grabación.";
+            });
+        }
+    </script>
+</body>
+</html>
